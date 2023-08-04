@@ -2,14 +2,14 @@ use std::fmt::{Debug, format, Formatter, Write};
 use std::path::{Path, PathBuf};
 use std::{io, process};
 use std::process::{ExitStatus, Output};
-use std::str::FromStr;
+use std::str::{Chars, FromStr};
 use std::sync::Arc;
 use chrono::{DateTime, Duration, NaiveDate, Utc};
 use hyprland::command;
 use hyprland::event_listener::{AsyncEventListener, EventListener};
 use hyprland::prelude::*;
 use little_exif::metadata::Metadata;
-use log::{debug, error};
+use log::{debug, error, warn};
 use reqwest::{Client, Error, Response};
 use serde::Deserialize;
 use thiserror::Error;
@@ -233,17 +233,43 @@ fn apply_wallpaper_to_monitor(path: &Path, monitor: &str) -> Result<(), ApplyWal
     Ok(())
 }
 
-struct ParseBingDateError;
+#[derive(Debug, Error)]
+enum ParseBingDateError {
+    #[error("Unexpected end of string")]
+    EndOfString,
+    #[error(transparent)]
+    ParseIntError(#[from] std::num::ParseIntError),
+    #[error("Invalid date")]
+    InvalidDate,
+}
 
 fn parse_date(date: &str) -> Result<DateTime<Utc>, ParseBingDateError> {
-    let chars = date.chars();
+    let mut chars = date.chars();
 
-    let year = chars.clone().take(4).collect::<String>().parse::<i32>().map_err(|_| ParseBingDateError)?;
-    let month = chars.clone().skip(4).take(2).collect::<String>().parse::<u32>().map_err(|_| ParseBingDateError)?;
-    let day = chars.clone().skip(6).take(2).collect::<String>().parse::<u32>().map_err(|_| ParseBingDateError)?;
+    fn next_string(chars: &mut Chars, len: u32) -> Option<String> {
+        let mut string = String::with_capacity(len as usize);
+        for _ in 0..len {
+            string.push(chars.next()?);
+        }
+        Some(string)
+    }
 
-    Ok(NaiveDate::from_ymd_opt(year, month, day).ok_or(ParseBingDateError)?
-        .and_hms_opt(0, 0, 0).ok_or(ParseBingDateError)?
+    let year = next_string(&mut chars, 4).ok_or(ParseBingDateError::EndOfString)?.parse::<i32>()?;
+    let month = next_string(&mut chars, 2).ok_or(ParseBingDateError::EndOfString)?.parse::<u32>()?;
+    let day = next_string(&mut chars, 2).ok_or(ParseBingDateError::EndOfString)?.parse::<u32>()?;
+
+    let hour = match next_string(&mut chars, 2) {
+        Some(hour) => hour.parse::<u32>()?,
+        // default to 7am
+        None => 7,
+    };
+    let min = match next_string(&mut chars, 2) {
+        Some(min) => min.parse::<u32>()?,
+        None => 0,
+    };
+
+    Ok(NaiveDate::from_ymd_opt(year, month, day).ok_or(ParseBingDateError::InvalidDate)?
+        .and_hms_opt(hour, min, 0).ok_or(ParseBingDateError::InvalidDate)?
         .and_utc())
 }
 
@@ -279,36 +305,50 @@ impl BingWallpaper {
         };
         image.get_image_file_name();
 
-        // check if picture is already downloaded
         let picture_directory = self.configuration.get_pictures_directory();
         let picture_path = picture_directory.join(image.get_image_file_name());
 
-        if !picture_path.exists() {
-            if let Err(error) = download_image(&image, &picture_path).await {
-                error!("Failed to download image: {}, retrying in an hour.", error);
-                return DateTime::from(Utc::now() + Duration::hours(1));
-            }
+        if last_picture.as_ref().map_or(false, |last_picture| &picture_path == last_picture) {
+            debug!("Bing returned same picture as last time");
         } else {
-            debug!("Picture already downloaded");
-        }
+            // check if picture is already downloaded
+            if !picture_path.exists() {
+                if let Err(error) = download_image(&image, &picture_path).await {
+                    error!("Failed to download image: {}, retrying in an hour.", error);
+                    return DateTime::from(Utc::now() + Duration::hours(1));
+                }
+            } else {
+                debug!("Picture already downloaded");
+            }
 
-        debug!("Applying wallpaper");
-        if let Err(error) = apply_wallpaper_to_all_monitors(&picture_path).await {
-            error!("Failed to apply wallpaper: {}", error);
-        }
+            debug!("Applying wallpaper");
+            if let Err(error) = apply_wallpaper_to_all_monitors(&picture_path).await {
+                error!("Failed to apply wallpaper: {}", error);
+            }
 
-        if let Some(last_picture) = last_picture.as_ref() {
-            if last_picture != &picture_path {
-                debug!("Unloading old wallpaper: {}", last_picture.display());
-                if let Err(error) = execute_hyprctl_hyprpaper("unload", &last_picture.display().to_string()) {
-                    error!("Failed to unload old wallpaper: {}", error);
+            if let Some(last_picture) = last_picture.as_ref() {
+                if last_picture != &picture_path {
+                    debug!("Unloading old wallpaper: {}", last_picture.display());
+                    if let Err(error) = execute_hyprctl_hyprpaper("unload", &last_picture.display().to_string()) {
+                        error!("Failed to unload old wallpaper: {}", error);
+                    }
                 }
             }
+
+            *last_picture = Some(picture_path);
         }
 
-        *last_picture = Some(picture_path);
-
-        parse_date(&image.end_date).unwrap_or_else(|_| Utc::now() + Duration::hours(24))
+        match parse_date(&image.end_date) {
+            Ok(end_date) if end_date < Utc::now() => {
+                warn!("Bing returned end date in the past, assuming 24 hours from now");
+                Utc::now() + Duration::hours(24)
+            }
+            Ok(end_date) => end_date,
+            Err(err) => {
+                warn!("Failed to parse end date: {}, assuming 24 hours from now", err);
+                Utc::now() + Duration::hours(24)
+            },
+        }
     }
 }
 
