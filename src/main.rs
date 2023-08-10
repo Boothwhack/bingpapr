@@ -1,28 +1,24 @@
-use std::fmt::{Debug, format, Formatter, Write};
+mod hyprpaper;
+
+use std::fmt::{Debug, Formatter};
 use std::path::{Path, PathBuf};
 use std::{io, process};
-use std::process::{ExitStatus, Output};
 use std::str::{Chars, FromStr};
 use std::sync::Arc;
 use chrono::{DateTime, Duration, NaiveDate, Utc};
-use hyprland::command;
-use hyprland::event_listener::{AsyncEventListener, EventListener};
+use hyprland::event_listener::EventListener;
 use hyprland::prelude::*;
-use little_exif::metadata::Metadata;
 use log::{debug, error, warn};
-use reqwest::{Client, Error, Response};
+use reqwest::{Client, Error};
 use serde::Deserialize;
 use thiserror::Error;
-use tokio::fs::{create_dir_all, File};
+use tokio::fs::File;
 use tokio::io::AsyncWriteExt;
 use std::sync::Mutex;
-use hyprland::data::Monitor;
-use tokio::task::{LocalSet, spawn_local};
+use tokio::task::LocalSet;
 use tokio_stream::StreamExt;
 use tokio_walltime::sleep_until;
-use wayland_client::{Connection, Dispatch, QueueHandle};
-use wayland_client::protocol::wl_registry;
-use wayland_client::protocol::wl_registry::{WlRegistry};
+use crate::hyprpaper::Hyprpaper;
 
 #[derive(Default)]
 pub enum Market {
@@ -189,7 +185,7 @@ fn execute_hyprctl_hyprpaper(command: &str, argument: &str) -> Result<(), ApplyW
     let output = process::Command::new("hyprctl")
         .arg("hyprpaper")
         .arg(command)
-        .arg(argument)
+        .arg(&format!("\"{}\"", argument))
         .output()?;
     if !output.status.success() {
         return Err(ApplyWallpaperError::ExecuteHyprCtlError(
@@ -205,30 +201,6 @@ fn execute_hyprctl_hyprpaper(command: &str, argument: &str) -> Result<(), ApplyW
     if let Ok(stderr) = String::from_utf8(output.stderr) {
         debug!("Output stderr:\n{}", stderr);
     }
-
-    Ok(())
-}
-
-async fn apply_wallpaper_to_all_monitors(path: &Path) -> Result<(), ApplyWallpaperError> {
-    debug!("Preloading wallpaper: {}", path.display());
-
-    execute_hyprctl_hyprpaper("preload", &path.display().to_string())?;
-
-    let monitors = hyprland::data::Monitors::get_async().await?;
-
-    for monitor in monitors {
-        apply_wallpaper_to_monitor(path, &monitor.name)?;
-    }
-
-    Ok(())
-}
-
-fn apply_wallpaper_to_monitor(path: &Path, monitor: &str) -> Result<(), ApplyWallpaperError> {
-    let path = path.display();
-    debug!("Applying wallpaper to monitor: {}", path);
-
-    let wallpaper_argument = format!("{},{}", monitor, path);
-    execute_hyprctl_hyprpaper("wallpaper", &wallpaper_argument)?;
 
     Ok(())
 }
@@ -275,6 +247,7 @@ fn parse_date(date: &str) -> Result<DateTime<Utc>, ParseBingDateError> {
 
 struct BingWallpaper {
     client: Client,
+    hyprpaper: Hyprpaper,
     configuration: Configuration,
     last_picture: Mutex<Option<PathBuf>>,
 }
@@ -284,7 +257,7 @@ impl BingWallpaper {
         let last_picture = self.last_picture.lock().unwrap();
 
         if let Some(last_picture) = last_picture.as_ref() {
-            if let Err(err) = apply_wallpaper_to_monitor(last_picture, &monitor) {
+            if let Err(err) = self.apply_wallpaper_to_monitor(&monitor, last_picture) {
                 error!("Failed to apply wallpaper to monitor: {}", err);
             }
         }
@@ -321,8 +294,14 @@ impl BingWallpaper {
                 debug!("Picture already downloaded");
             }
 
+            debug!("Preloading wallpaper");
+            if let Err(error) = self.hyprpaper.preload(&picture_path) {
+                error!("Failed to preload wallpaper: {}, retrying in an hour", error);
+                return DateTime::from(Utc::now() + Duration::hours(1));
+            }
+
             debug!("Applying wallpaper");
-            if let Err(error) = apply_wallpaper_to_all_monitors(&picture_path).await {
+            if let Err(error) = self.apply_wallpaper_to_all_monitors(&picture_path).await {
                 error!("Failed to apply wallpaper: {}", error);
             }
 
@@ -347,8 +326,23 @@ impl BingWallpaper {
             Err(err) => {
                 warn!("Failed to parse end date: {}, assuming 24 hours from now", err);
                 Utc::now() + Duration::hours(24)
-            },
+            }
         }
+    }
+
+    async fn apply_wallpaper_to_all_monitors(&self, path: &Path) -> Result<(), ApplyWallpaperError> {
+        let monitors = hyprland::data::Monitors::get_async().await?;
+
+        for monitor in monitors {
+            self.apply_wallpaper_to_monitor(&monitor.name, path)?;
+        }
+
+        Ok(())
+    }
+
+    fn apply_wallpaper_to_monitor(&self, monitor: &str, path: &Path) -> Result<(), ApplyWallpaperError> {
+        self.hyprpaper.set_wallpaper(monitor, path)?;
+        Ok(())
     }
 }
 
@@ -358,6 +352,7 @@ async fn main() {
 
     let client = Client::new();
     let configuration = Configuration::default();
+    let hyprpaper = Hyprpaper::new().expect("failed to connect to hyprpaper IPC");
 
     let local = LocalSet::new();
 
@@ -365,6 +360,7 @@ async fn main() {
 
     let bing = BingWallpaper {
         client,
+        hyprpaper,
         configuration,
         last_picture: Mutex::new(None),
     };
