@@ -308,7 +308,7 @@ impl BingWallpaper {
             if let Some(last_picture) = last_picture.as_ref() {
                 if last_picture != &picture_path {
                     debug!("Unloading old wallpaper: {}", last_picture.display());
-                    if let Err(error) = execute_hyprctl_hyprpaper("unload", &last_picture.display().to_string()) {
+                    if let Err(error) = self.hyprpaper.unload(last_picture) {
                         error!("Failed to unload old wallpaper: {}", error);
                     }
                 }
