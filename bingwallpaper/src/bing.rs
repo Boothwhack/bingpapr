@@ -73,11 +73,11 @@ pub struct BingImage {
     title: String,
 }
 
-const DATE_FORMAT: &str = "%Y%m%d";
-const TIME_FORMAT: &str = "%H%M";
+pub const BING_DATE_FORMAT: &str = "%Y%m%d";
+pub const TIME_FORMAT: &str = "%H%M";
 
 pub fn parse_bing_date(s: &str) -> Result<DateTime<Utc>, chrono::ParseError> {
-    let (date, time) = NaiveDate::parse_and_remainder(s, &DATE_FORMAT)?;
+    let (date, time) = NaiveDate::parse_and_remainder(s, &BING_DATE_FORMAT)?;
     let time = NaiveTime::parse_from_str(time, &TIME_FORMAT)
         .unwrap_or_else(|_| NaiveTime::from_hms_opt(7, 0, 0).unwrap());
 

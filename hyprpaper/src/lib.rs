@@ -10,6 +10,14 @@ pub struct Hyprpaper {
 
 pub type HyprpaperResult = Result<String, io::Error>;
 
+fn path_to_string(path: &Path) -> HyprpaperResult {
+    if let Some(path) = path.to_str() {
+        Ok(path.to_string())
+    } else {
+        Err(io::Error::new(ErrorKind::NotFound, "Path not found"))
+    }
+}
+
 impl Hyprpaper {
     pub fn new() -> Option<Hyprpaper> {
         let path = Path::new("/tmp/hypr");
@@ -31,12 +39,7 @@ impl Hyprpaper {
 
     pub fn preload(&self, path: &Path) -> HyprpaperResult {
         debug!("Preloading wallpaper: {}", path.display());
-        let path = if let Some(path) = path.to_str() {
-            path
-        } else {
-            return Err(io::Error::new(ErrorKind::NotFound, "Path not found"));
-        };
-        let command = format!("preload {}", path);
+        let command = format!("preload {}", path_to_string(path)?);
         let output = self.send(command.as_bytes())?;
         debug!("hyprpaper preload output: {}", output);
         Ok(output)
@@ -44,12 +47,7 @@ impl Hyprpaper {
 
     pub fn set_wallpaper(&self, monitor: &str, path: &Path) -> HyprpaperResult {
         debug!("Applying wallpaper to monitor: {}", path.display());
-        let path = if let Some(path) = path.to_str() {
-            path
-        } else {
-            return Err(io::Error::new(ErrorKind::NotFound, "Path not found"));
-        };
-        let command = format!("wallpaper {},{}", monitor, path);
+        let command = format!("wallpaper {},{}", monitor, path_to_string(path)?);
         let output = self.send(command.as_bytes())?;
         debug!("hyprpaper wallpaper output: {}", output);
         Ok(output)
@@ -57,12 +55,7 @@ impl Hyprpaper {
 
     pub fn unload(&self, path: &Path) -> HyprpaperResult {
         debug!("Unloading wallpaper: {}", path.display());
-        let path = if let Some(path) = path.to_str() {
-            path
-        } else {
-            return Err(io::Error::new(ErrorKind::NotFound, "Path not found"));
-        };
-        let command = format!("unload {}", path);
+        let command = format!("unload {}", path_to_string(path)?);
         let output = self.send(command.as_bytes())?;
         debug!("hyprpaper unload output: {}", output);
         Ok(output)
