@@ -1,4 +1,4 @@
-mod bingwallpaper;
+mod bingdaily;
 
 use std::fmt::Debug;
 use std::path::{Path, PathBuf};
@@ -56,12 +56,12 @@ async fn main() {
     env_logger::builder().target(env_logger::Target::Stdout).init();
 
     let connection = Connection::session().await.expect("dbus session");
-    let bingwallpaper = bingwallpaper::BingWallpaper1Proxy::new(&connection).await.expect("BingWallpaper proxy");
+    let bingwallpaper = bingdaily::BingDaily1Proxy::new(&connection).await.expect("BingWallpaper proxy");
 
     let hyprpaper = Hyprpaper::new().expect("failed to connect to hyprpaper IPC");
 
     // get initial wallpaper
-    let path = bingwallpaper.current_wallpaper().await.expect("wallpaper property");
+    let path = bingwallpaper.current_picture().await.expect("wallpaper property");
     let path = PathBuf::from_str(&path).expect("wallpaper path");
 
     let bingpaper = Arc::new(Mutex::new(BingPapr {
@@ -81,7 +81,7 @@ async fn main() {
     let watch_property_task = {
         let bingpaper = bingpaper.clone();
         spawn(async move {
-            while let Some(wallpaper) = bingwallpaper.receive_current_wallpaper_changed().await.next().await {
+            while let Some(wallpaper) = bingwallpaper.receive_current_picture_changed().await.next().await {
                 let wallpaper = wallpaper.get().await.expect("wallpaper property");
                 let path = PathBuf::from_str(&wallpaper).expect("wallpaper path");
 
