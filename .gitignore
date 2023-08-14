@@ -1,2 +1,6 @@
-/target
 .idea
+/pkg
+/src
+/target
+/*.tar.gz
+/*.pkg.*
