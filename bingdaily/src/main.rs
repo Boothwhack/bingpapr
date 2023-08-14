@@ -61,8 +61,6 @@ async fn main() {
         .build()
         .await.unwrap();
 
-    // todo: fork process here?
-
     let mut wait_until = match manager.poll_local_picture().await {
         Some(LocalPicture::Today(path)) => {
             debug!("Located today's picture at {}", path.display());
