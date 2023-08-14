@@ -7,7 +7,7 @@ url="https://github.com/Boothwhack/bingpapr"
 license=('MIT')
 makedepends=('cargo')
 source=("$pkgname-$pkgver.tar.gz::https://github.com/Boothwhack/bingpapr/archive/refs/tags/$pkgname-v$pkgver.tar.gz")
-sha256sums=('c60585c0df6f0bfeeb4fc64e5fc46e6a9f13344931a737c343e86dfe42398cd7')
+sha256sums=('f9c46eb9df13d7c8a19173100a082fb6f19eeb099ddbcb0640c245d7ae48e522')
 
 build() {
 	cd "bingpapr-$pkgname-v$pkgver"
