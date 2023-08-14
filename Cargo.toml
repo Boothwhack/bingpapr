@@ -1,7 +1,7 @@
 [workspace]
 members = [
     "bingpapr",
-    "bingwallpaper",
+    "bingdaily",
     "hyprpaper",
 ]
 

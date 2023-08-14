@@ -17,7 +17,7 @@ pub struct Configuration {
 impl Configuration {
     fn get_config_directory() -> PathBuf {
         match directories::BaseDirs::new() {
-            Some(base_dirs) => base_dirs.config_dir().join("bingwallpaper"),
+            Some(base_dirs) => base_dirs.config_dir().join(".."),
             None => {
                 PathBuf::from_str("~/.config/bingwallpaper").expect("Failed to get configuration directory")
             }

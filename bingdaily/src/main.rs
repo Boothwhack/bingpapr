@@ -1,3 +1,13 @@
+//! Minimal D-Bus service providing Bing's daily picture. Can be used by wallpaper engines to apply
+//! a unique photograph as a daily changing wallpaper.
+//!
+//! The picture is automatically downloaded when a new one becomes available, and the path to this
+//! downloaded file is provided by the `/net/boothwhack/BingDaily1` object's `CurrentPicture`
+//! property.
+//!
+//! Subscribe to the `PropertiesChanged` signal to get notified when a new picture has become
+//! available locally.
+
 pub mod bing;
 pub mod manager;
 
@@ -14,7 +24,7 @@ use crate::manager::{Configuration, LocalPicture, Manager, predict_next_poll_tim
 
 async fn locate_bliss() -> Option<PathBuf> {
     let possibilities = [
-        PathBuf::from("/usr/lib/bingwallpaper/bliss.jpg"),
+        PathBuf::from("/usr/lib/bingdaily/bliss.jpg"),
         env::current_dir().unwrap().join("bliss.jpg"),
         env::current_exe().unwrap().join("bliss.jpg"),
     ];
@@ -32,7 +42,7 @@ async fn locate_bliss() -> Option<PathBuf> {
 async fn main() {
     env_logger::builder().target(env_logger::Target::Stdout).init();
 
-    let bliss = locate_bliss().await.expect("locate default wallpaper");
+    let bliss = locate_bliss().await.expect("locate fallback picture");
     let bliss = bliss.to_string_lossy().to_string();
     let current_picture = Arc::new(Mutex::new(bliss));
 
@@ -44,10 +54,10 @@ async fn main() {
     let mut picture = current_picture.lock().await;
 
     // start d-bus service as soon as possible
-    let iface = BingWallpaper { current_wallpaper: current_picture.clone() };
+    let iface = BingDaily { current_picture: current_picture.clone() };
     let connection = ConnectionBuilder::session().unwrap()
-        .name("net.boothwhack.BingWallpaper1").unwrap()
-        .serve_at("/net/boothwhack/BingWallpaper1", iface).unwrap()
+        .name("net.boothwhack.BingDaily1").unwrap()
+        .serve_at("/net/boothwhack/BingDaily1", iface).unwrap()
         .build()
         .await.unwrap();
 
@@ -98,26 +108,26 @@ async fn main() {
             *picture = path.to_string_lossy().to_string();
             drop(picture);
 
-            let iface_ref = connection.object_server().interface::<_, BingWallpaper>("/net/boothwhack/BingWallpaper1")
+            let iface_ref = connection.object_server().interface::<_, BingDaily>("/net/boothwhack/BingDaily1")
                 .await.unwrap();
             let iface = iface_ref.get_mut().await;
-            if let Err(err) = iface.current_wallpaper_changed(iface_ref.signal_context()).await {
+            if let Err(err) = iface.current_picture_changed(iface_ref.signal_context()).await {
                 error!("Error while notifying property changed: {}", err);
             }
         }
     }
 }
 
-struct BingWallpaper {
+struct BingDaily {
     // todo: include metadata
-    current_wallpaper: Arc<Mutex<String>>,
+    current_picture: Arc<Mutex<String>>,
 }
 
-#[dbus_interface(name = "net.boothwhack.BingWallpaper1")]
-impl BingWallpaper {
+#[dbus_interface(name = "net.boothwhack.BingDaily1")]
+impl BingDaily {
     #[dbus_interface(property)]
-    async fn current_wallpaper(&self) -> String {
-        let current_wallpaper = self.current_wallpaper.lock().await;
-        current_wallpaper.clone()
+    async fn current_picture(&self) -> String {
+        let current_picture = self.current_picture.lock().await;
+        current_picture.clone()
     }
 }
