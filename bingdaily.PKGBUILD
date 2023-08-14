@@ -1,5 +1,5 @@
 pkgname=bingdaily
-pkgver=0.1.0
+pkgver=0.1.1
 pkgrel=1
 pkgdesc="Minimal D-Bus service providing Bing's daily picture."
 arch=('any')
