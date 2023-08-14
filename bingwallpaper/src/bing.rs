@@ -6,7 +6,7 @@ use chrono::{DateTime, NaiveDate, NaiveTime, Utc};
 use log::debug;
 use serde::Deserialize;
 use thiserror::Error;
-use tokio::fs::File;
+use tokio::fs::{create_dir_all, File};
 use tokio::io::AsyncWriteExt;
 use tokio_stream::StreamExt;
 
@@ -149,6 +149,12 @@ impl Bing {
         debug!("Downloading image from {} into {}", url, path.display());
 
         let response = self.client.get(&url).send().await?;
+        if let Some(parent) = path.parent() {
+            if let Ok(false) = tokio::fs::try_exists(parent).await {
+                create_dir_all(parent).await
+                    .map_err(|err| DownloadImageError::IoError(path.to_path_buf(), err))?;
+            }
+        }
         let mut file = File::create(&path)
             .await
             .map_err(|err| DownloadImageError::IoError(path.to_owned(), err))?;

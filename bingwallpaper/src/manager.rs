@@ -93,8 +93,8 @@ impl Manager {
         let image = match self.bing.image_of_the_day().await {
             Ok(image) => image,
             Err(error) => {
-                error!("Failed to query image of the day: {}, retrying in an hour.", error);
-                return (None, DateTime::from(Utc::now() + Duration::hours(1)));
+                error!("Failed to query image of the day: {}, retrying in 5 minutes.", error);
+                return (None, DateTime::from(Utc::now() + Duration::minutes(5)));
             }
         };
         image.get_image_file_name();
@@ -107,8 +107,8 @@ impl Manager {
             debug!("Picture already downloaded");
         } else {
             if let Err(error) = self.bing.download_image(&image, &picture_path).await {
-                error!("Failed to download image: {}, retrying in an hour.", error);
-                return (None, DateTime::from(Utc::now() + Duration::hours(1)));
+                error!("Failed to download image: {}, retrying in 5 minutes.", error);
+                return (None, DateTime::from(Utc::now() + Duration::minutes(5)));
             }
         }
 

@@ -1,16 +1,18 @@
+mod bingwallpaper;
+
 use std::fmt::Debug;
 use std::path::{Path, PathBuf};
-use std::{io, process};
+use std::io;
 use std::str::FromStr;
 use std::sync::Arc;
-use chrono::{DateTime, Duration, Utc};
 use hyprland::event_listener::EventListener;
 use hyprland::prelude::*;
-use log::{debug, error, warn};
+use log::{error, warn};
 use thiserror::Error;
-use std::sync::Mutex;
-use tokio::task::LocalSet;
-use tokio_walltime::sleep_until;
+use tokio::{join, spawn};
+use tokio::sync::Mutex;
+use zbus::Connection;
+use zbus::export::futures_util::StreamExt;
 use hyprpaper::Hyprpaper;
 
 #[derive(Debug, Error)]
@@ -19,31 +21,19 @@ enum ApplyWallpaperError {
     HyprError(#[from] hyprland::shared::HyprError),
     #[error(transparent)]
     IoError(#[from] io::Error),
-    #[error("hyprctl exited with code {0:?}: {1}")]
-    ExecuteHyprCtlError(Option<i32>, String),
-    #[error("hyprctl exited with code {0:?} and parsing output as UTF-8 failed: {1}")]
-    ParseUtf8Error(Option<i32>, #[source] std::string::FromUtf8Error),
 }
 
-struct BingWallpaper {
+struct BingPapr {
     hyprpaper: Hyprpaper,
-    last_picture: Mutex<Option<PathBuf>>,
+    last_picture: PathBuf,
 }
 
-impl BingWallpaper {
+impl BingPapr {
     fn on_monitor_added(&self, monitor: &str) {
-        let last_picture = self.last_picture.lock().unwrap();
-
-        if let Some(last_picture) = last_picture.as_ref() {
-            if let Err(err) = self.apply_wallpaper_to_monitor(&monitor, last_picture) {
-                error!("Failed to apply wallpaper to monitor: {}", err);
-            }
+        if let Err(err) = self.apply_wallpaper_to_monitor(&monitor, &self.last_picture) {
+            error!("Failed to apply wallpaper to monitor: {}", err);
         }
     }
-
-    /// Applies the current wallpaper from Bing to all monitors. Returns the time when the
-    /// wallpaper should be updated next.
-
 
     async fn apply_wallpaper_to_all_monitors(&self, path: &Path) -> Result<(), ApplyWallpaperError> {
         let monitors = hyprland::data::Monitors::get_async().await?;
@@ -65,14 +55,60 @@ impl BingWallpaper {
 async fn main() {
     env_logger::builder().target(env_logger::Target::Stdout).init();
 
+    let connection = Connection::session().await.expect("dbus session");
+    let bingwallpaper = bingwallpaper::BingWallpaper1Proxy::new(&connection).await.expect("BingWallpaper proxy");
+
     let hyprpaper = Hyprpaper::new().expect("failed to connect to hyprpaper IPC");
 
-    // TODO: Ensure copyright tag is properly set on image file
+    // get initial wallpaper
+    let path = bingwallpaper.current_wallpaper().await.expect("wallpaper property");
+    let path = PathBuf::from_str(&path).expect("wallpaper path");
 
-    let bing = BingWallpaper {
+    let bingpaper = Arc::new(Mutex::new(BingPapr {
+        last_picture: path.clone(),
         hyprpaper,
-        last_picture: Mutex::new(None),
+    }));
+
+    // apply initial wallpaper
+    {
+        let bingpaper = bingpaper.lock().await;
+        bingpaper.hyprpaper.preload(&path).expect("preload wallpaper");
+        if let Err(error) = bingpaper.apply_wallpaper_to_all_monitors(&path).await {
+            warn!("Failed to apply wallpaper '{}' to all monitors: {}", path.display(), error)
+        }
+    }
+
+    let watch_property_task = {
+        let bingpaper = bingpaper.clone();
+        spawn(async move {
+            while let Some(wallpaper) = bingwallpaper.receive_current_wallpaper_changed().await.next().await {
+                let wallpaper = wallpaper.get().await.expect("wallpaper property");
+                let path = PathBuf::from_str(&wallpaper).expect("wallpaper path");
+
+                let bingpaper = bingpaper.lock().await;
+                if let Err(error) = bingpaper.apply_wallpaper_to_all_monitors(&path).await {
+                    warn!("Failed to apply wallpaper '{}' to all monitors: {}", path.display(), error);
+                }
+            }
+        })
     };
 
-    todo!()
+    let watch_monitors_task = {
+        let bingpaper = bingpaper.clone();
+        spawn(async move {
+            let mut event_listener = EventListener::new();
+            event_listener.add_monitor_added_handler(move |monitor| {
+                let bingpaper = bingpaper.clone();
+                spawn(async move {
+                    let bingpaper = bingpaper.lock().await;
+                    bingpaper.on_monitor_added(&monitor);
+                });
+            });
+
+            event_listener.start_listener_async().await
+                .expect("failed to start event listener");
+        })
+    };
+
+    join!(watch_property_task, watch_monitors_task);
 }
