@@ -86,8 +86,12 @@ async fn main() {
                 let path = PathBuf::from_str(&wallpaper).expect("wallpaper path");
 
                 let bingpaper = bingpaper.lock().await;
-                if let Err(error) = bingpaper.apply_wallpaper_to_all_monitors(&path).await {
-                    warn!("Failed to apply wallpaper '{}' to all monitors: {}", path.display(), error);
+                if let Err(error) = bingpaper.hyprpaper.preload(&path) {
+                    warn!("Failed to preload wallpaper '{}': {}", path.display(), error);
+                } else {
+                    if let Err(error) = bingpaper.apply_wallpaper_to_all_monitors(&path).await {
+                        warn!("Failed to apply wallpaper '{}' to all monitors: {}", path.display(), error);
+                    }
                 }
             }
         })
