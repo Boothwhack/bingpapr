@@ -1,10 +1,10 @@
-mod bingdaily;
-
 use std::fmt::Debug;
-use std::path::{Path, PathBuf};
 use std::io;
+use std::mem::swap;
+use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::sync::Arc;
+
 use hyprland::event_listener::EventListener;
 use hyprland::prelude::*;
 use log::{error, warn};
@@ -13,7 +13,10 @@ use tokio::{join, spawn};
 use tokio::sync::Mutex;
 use zbus::Connection;
 use zbus::export::futures_util::StreamExt;
+
 use hyprpaper::Hyprpaper;
+
+mod bingdaily;
 
 #[derive(Debug, Error)]
 enum ApplyWallpaperError {
@@ -25,12 +28,27 @@ enum ApplyWallpaperError {
 
 struct BingPapr {
     hyprpaper: Hyprpaper,
-    last_picture: PathBuf,
+    active_picture: PathBuf,
 }
 
 impl BingPapr {
+    async fn set_new_wallpaper(&mut self, path: impl Into<PathBuf>) -> Result<(), ApplyWallpaperError> {
+        //let old_picture = swap(&mut self.active_picture)
+        let mut old_picture = path.into();
+        swap(&mut old_picture, &mut self.active_picture);
+
+        // apply new wallpaper before unloading the old one
+        self.hyprpaper.preload(&self.active_picture)?;
+        if let Err(error) = self.apply_wallpaper_to_all_monitors(&path).await {
+            warn!("Failed to apply wallpaper '{}' to all monitors: {}", path.display(), error);
+        }
+        self.hyprpaper.unload(&old_picture)?;
+
+        Ok(())
+    }
+
     fn on_monitor_added(&self, monitor: &str) {
-        if let Err(err) = self.apply_wallpaper_to_monitor(&monitor, &self.last_picture) {
+        if let Err(err) = self.apply_wallpaper_to_monitor(&monitor, &self.active_picture) {
             error!("Failed to apply wallpaper to monitor: {}", err);
         }
     }
@@ -65,7 +83,7 @@ async fn main() {
     let path = PathBuf::from_str(&path).expect("wallpaper path");
 
     let bingpaper = Arc::new(Mutex::new(BingPapr {
-        last_picture: path.clone(),
+        active_picture: path.clone(),
         hyprpaper,
     }));
 
@@ -85,13 +103,9 @@ async fn main() {
                 let wallpaper = wallpaper.get().await.expect("wallpaper property");
                 let path = PathBuf::from_str(&wallpaper).expect("wallpaper path");
 
-                let bingpaper = bingpaper.lock().await;
-                if let Err(error) = bingpaper.hyprpaper.preload(&path) {
-                    warn!("Failed to preload wallpaper '{}': {}", path.display(), error);
-                } else {
-                    if let Err(error) = bingpaper.apply_wallpaper_to_all_monitors(&path).await {
-                        warn!("Failed to apply wallpaper '{}' to all monitors: {}", path.display(), error);
-                    }
+                let mut bingpaper = bingpaper.lock().await;
+                if let Err(error) = bingpaper.set_new_wallpaper(path).await {
+                    warn!("Failed to set new wallpaper '{}': {}", path.display(), error);
                 }
             }
         })
