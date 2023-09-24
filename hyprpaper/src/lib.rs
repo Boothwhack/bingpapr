@@ -46,7 +46,7 @@ impl Hyprpaper {
     }
 
     pub fn set_wallpaper(&self, monitor: &str, path: &Path) -> HyprpaperResult {
-        debug!("Applying wallpaper to monitor: {}", path.display());
+        debug!("Applying wallpaper '{}' to monitor: {}", path.display(), monitor);
         let command = format!("wallpaper {},{}", monitor, path_to_string(path)?);
         let output = self.send(command.as_bytes())?;
         debug!("hyprpaper wallpaper output: {}", output);
