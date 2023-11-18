@@ -23,6 +23,8 @@ enum ApplyWallpaperError {
     #[error(transparent)]
     HyprError(#[from] hyprland::shared::HyprError),
     #[error(transparent)]
+    HyprpaperError(#[from] hyprpaper::HyprpaperError),
+    #[error(transparent)]
     IoError(#[from] io::Error),
 }
 
@@ -33,14 +35,13 @@ struct BingPapr {
 
 impl BingPapr {
     async fn set_new_wallpaper(&mut self, path: impl Into<PathBuf>) -> Result<(), ApplyWallpaperError> {
-        //let old_picture = swap(&mut self.active_picture)
         let mut old_picture = path.into();
         swap(&mut old_picture, &mut self.active_picture);
 
         // apply new wallpaper before unloading the old one
         self.hyprpaper.preload(&self.active_picture)?;
-        if let Err(error) = self.apply_wallpaper_to_all_monitors(&path).await {
-            warn!("Failed to apply wallpaper '{}' to all monitors: {}", path.display(), error);
+        if let Err(error) = self.apply_wallpaper_to_all_monitors(&self.active_picture).await {
+            warn!("Failed to apply wallpaper '{}' to all monitors: {}", self.active_picture.display(), error);
         }
         self.hyprpaper.unload(&old_picture)?;
 
@@ -104,7 +105,7 @@ async fn main() {
                 let path = PathBuf::from_str(&wallpaper).expect("wallpaper path");
 
                 let mut bingpaper = bingpaper.lock().await;
-                if let Err(error) = bingpaper.set_new_wallpaper(path).await {
+                if let Err(error) = bingpaper.set_new_wallpaper(&path).await {
                     warn!("Failed to set new wallpaper '{}': {}", path.display(), error);
                 }
             }

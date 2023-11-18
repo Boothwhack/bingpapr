@@ -1,20 +1,30 @@
 use std::{env, io};
 use std::io::{ErrorKind, Read, Write};
+use std::net::Shutdown;
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
-use log::debug;
+use log::{debug, error};
+use thiserror::Error;
 
 pub struct Hyprpaper {
     pub socket_path: PathBuf,
 }
 
-pub type HyprpaperResult = Result<String, io::Error>;
+pub type HyprpaperResult = Result<String, HyprpaperError>;
+
+#[derive(Error, Debug)]
+pub enum HyprpaperError {
+    #[error(transparent)]
+    IOError(#[from] io::Error),
+    #[error("unknown error from hyprpaper ipc")]
+    Hyprpaper,
+}
 
 fn path_to_string(path: &Path) -> HyprpaperResult {
     if let Some(path) = path.to_str() {
         Ok(path.to_string())
     } else {
-        Err(io::Error::new(ErrorKind::NotFound, "Path not found"))
+        Err(io::Error::new(ErrorKind::NotFound, "Path not found").into())
     }
 }
 
@@ -30,16 +40,22 @@ impl Hyprpaper {
 
     fn send(&self, msg: &[u8]) -> HyprpaperResult {
         let mut socket = UnixStream::connect(&self.socket_path)?;
+        let mut buf = [0u8; 2];
 
-        socket.write_all(msg)?;
-        let mut output = String::new();
-        socket.read_to_string(&mut output)?;
-        Ok(output)
+        socket.write(msg)?;
+        let read = socket.read(&mut buf)?;
+        socket.shutdown(Shutdown::Both)?;
+
+        if read == 2 && buf[..2] == *b"ok" {
+            Ok("ok".to_owned())
+        } else {
+            Err(HyprpaperError::Hyprpaper)
+        }
     }
 
     pub fn preload(&self, path: &Path) -> HyprpaperResult {
         debug!("Preloading wallpaper: {}", path.display());
-        let command = format!("preload {}", path_to_string(path)?);
+        let command = format!("preload {}\0", path_to_string(path)?);
         let output = self.send(command.as_bytes())?;
         debug!("hyprpaper preload output: {}", output);
         Ok(output)
