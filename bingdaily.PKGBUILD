@@ -6,13 +6,13 @@ arch=('any')
 url="https://github.com/Boothwhack/bingpapr"
 license=('MIT')
 makedepends=('cargo')
-source=("$pkgname-$pkgver.tar.gz::https://github.com/Boothwhack/bingpapr/archive/refs/tags/$pkgname-v$pkgver.tar.gz")
+source=("$pkgname-$pkgver.tar.gz::https://github.com/Boothwhack/bingpapr/archive/refs/tags/v$pkgver.tar.gz")
 sha256sums=('f9c46eb9df13d7c8a19173100a082fb6f19eeb099ddbcb0640c245d7ae48e522')
 
 build() {
 	cd "bingpapr-$pkgname-v$pkgver"
 
-	cargo build --package bingdaily --release
+	cargo build --package $pkgname --release
 }
 
 package() {
